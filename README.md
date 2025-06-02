@@ -5,7 +5,7 @@
 ## Integrantes do Grupo
 
 ### Kauã Almeida Silveira
-- **Responsável por:** API em Java Spring Boot, integração com o banco de dados Oracle, e API Python com Roboflow para visão computacional.
+- **Responsável por:** API em Java Spring Boot, integração com o banco de dados.
 ### Rafael Vida
 - **Responsável por:** DevOps no Azure e QA, garantindo o pipeline de integração contínua e a qualidade do software.
 ### Gustavo Maia
@@ -20,7 +20,7 @@ GITHUB REPOSITÓRIO DO PROJETO JAVA MVC: https://github.com/gs-eventos-extremos/
 ## Pré-requisitos para rodar a API Spring Boot:
 - Java 21 ou superior instalado (para a API Spring Boot)
 - Maven instalado (para a API Spring Boot)
-- As configurações do banco de dados Oracle estão no arquivo `application-dev.properties` na pasta `src/main/resources`.
+- As configurações do banco de dados estão no arquivo `application-dev.properties` na pasta `src/main/resources`.
 
 ## Passo a Passo:
 
