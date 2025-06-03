@@ -1,0 +1,167 @@
+trigger:
+  branches:
+    include:
+    - main
+    - master
+    - minharelease
+
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+- name: rm
+  value: rm552618
+- name: location
+  value: westus3
+- name: resourceGroup
+  value: rg-gs-project
+- name: service-plan
+  value: planGsProject
+- name: app-name
+  value: gs-project-$(rm)
+- name: runtime
+  value: JAVA:21-java21
+- name: sku
+  value: F1
+- name: nome-artefato
+  value: GsProject
+- name: sqlServerName
+  value: sqlserver$(rm) 
+- name: sqlDbName
+  value: gsdb$(rm) 
+- name: sqlAdmin
+  value: adminuser 
+- name: sqlPassword
+  value: 'MinhaSenha123!'
+
+stages:
+- stage: CriarInfra
+  jobs:
+  - job: criaInfraCompleta
+    displayName: Criar Web App e SQL Server
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Provisionar Recursos Azure'
+      inputs:
+        azureSubscription: '380396fb-c70d-469c-a365-dc2e7b132aa0'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Criar o Grupo de Recursos
+          echo "Criando Grupo de Recursos: $(resourceGroup) na localização $(location)..."
+          az group create --location $(location) --name $(resourceGroup)
+
+          # Criar o Plano de Serviço com SO igual a Linux
+          echo "Criando Plano de Serviço: $(service-plan)..."
+          az appservice plan create -g $(resourceGroup) -n $(service-plan) --is-linux --sku $(sku)
+
+          # Criar um Serviço de Aplicativo com JAVA 21 SE como runtime
+          echo "Criando Serviço de Aplicativo: $(app-name)..."
+          az webapp create -g $(resourceGroup) -p $(service-plan) -n $(app-name) --runtime "$(runtime)"
+
+          # Criar o SQL Server
+          echo "Criando SQL Server: $(sqlServerName)..."
+          az sql server create \
+            --name $(sqlServerName) \
+            --resource-group $(resourceGroup) \
+            --location $(location) \
+            --admin-user $(sqlAdmin) \
+            --admin-password "$(sqlPassword)"
+
+          # Criar o banco de dados
+          echo "Criando banco de dados: $(sqlDbName) no servidor $(sqlServerName)..."
+          az sql db create \
+            --resource-group $(resourceGroup) \
+            --server $(sqlServerName) \
+            --name $(sqlDbName) \
+            --service-objective S0
+
+          # Liberando acesso de qualquer IP
+          echo "Configurando regra de firewall para permitir todos os IPs (0.0.0.0-255.255.255.255)..."
+          az sql server firewall-rule create \
+            --resource-group $(resourceGroup) \
+            --server $(sqlServerName) \
+            --name AllowAll \
+            --start-ip-address 0.0.0.0 \
+            --end-ip-address 255.255.255.255
+
+- stage: BuildApp
+  variables:
+  - name: mavenPOMFile
+    value: 'pom.xml'
+  jobs:
+  - job: buildWebApp
+    displayName: Realizar o Build do App
+    steps:
+    - task: Maven@4
+      displayName: 'Build GsProject'
+      inputs:
+        mavenPomFile: '$(mavenPOMFile)'
+        testRunTitle: 'Testes Unitários'
+        jdkVersionOption: 1.21
+        goals: 'clean package -DskipTests'
+    - task: CopyFiles@2
+      displayName: 'Copiar a aplicação GsProject'
+      inputs:
+        SourceFolder: '$(system.defaultworkingdirectory)'
+        Contents: 'target/*.jar'
+        TargetFolder: '$(build.artifactstagingdirectory)'
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publicar artefato do Build GsProject'
+      inputs:
+        PathtoPublish: '$(build.artifactstagingdirectory)'
+        ArtifactName: $(nome-artefato)
+
+- stage: DeployApp
+  dependsOn:
+  - CriarInfra
+  - BuildApp
+  jobs:
+  - job: DeployWebApp
+    displayName: Deploy no Serviço de Aplicativo
+    steps:
+    - task: DownloadBuildArtifacts@1
+      displayName: 'Baixar artefato gerado'
+      inputs:
+        buildType: 'current'
+        downloadType: 'specific'
+        downloadPath: '$(System.DefaultWorkingDirectory)'
+    - task: AzureRmWebAppDeployment@4
+      displayName: 'Deploy GsProject'
+      inputs:
+        azureSubscription: '380396fb-c70d-469c-a365-dc2e7b132aa0'
+        appType: 'webApp'
+        WebAppName: $(app-name)
+        packageForLinux: '$(System.DefaultWorkingDirectory)/$(nome-artefato)/target/*.jar'
+    - task: AzureCLI@2
+      displayName: 'Configurar Application Settings para Conexão com Banco de Dados'
+      inputs:
+        azureSubscription: '380396fb-c70d-469c-a365-dc2e7b132aa0'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Configurando variáveis de ambiente para conexão com SQL Server..."
+          az webapp config appsettings set \
+            --resource-group $(resourceGroup) \
+            --name $(app-name) \
+            --settings \
+            SPRING_DATASOURCE_URL="jdbc:sqlserver://$(sqlServerName).database.windows.net:1433;database=$(sqlDbName);encrypt=true;trustServerCertificate=false;loginTimeout=30;" \
+            SPRING_DATASOURCE_USERNAME="$(sqlAdmin)@$(sqlServerName)" \
+            SPRING_DATASOURCE_PASSWORD="$(sqlPassword)" \
+            SPRING_DATASOURCE_DRIVER_CLASS_NAME="com.microsoft.sqlserver.jdbc.SQLServerDriver" \
+            SPRING_JPA_DATABASE_PLATFORM="org.hibernate.dialect.SQLServer2012Dialect" \
+            SPRING_JPA_HIBERNATE_DDL_AUTO="update" \
+            SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL="true" \
+            SPRING_JPA_SHOW_SQL="true"
+
+    - task: AzureCLI@2
+      displayName: 'Reiniciar Aplicação Após Configuração'
+      inputs:
+        azureSubscription: '380396fb-c70d-469c-a365-dc2e7b132aa0'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Reiniciando o Serviço de Aplicativo $(app-name)..."
+          az webapp restart -g $(resourceGroup) -n $(app-name)
+          echo "Aguardando 30 segundos para a aplicação inicializar..."
+          sleep 30
