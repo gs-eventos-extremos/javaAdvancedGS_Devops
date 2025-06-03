@@ -33,4 +33,8 @@ Na plataforma, há uma tela dedicada que exibe um mapa fornecido pelo serviço d
 3. **Defina o JDK no Intellij para Run & build do projeto**
 4. **Rode a aplicação Spring Boot, localizada na pasta raiz**
    ```ChallengeJavaApplication.java```
+## DER
+![DER](./DER.png)
 
+## Diagrama Pipeline
+![DIAGRAMA_PIPELINE](./DiagramPipeline.png)
